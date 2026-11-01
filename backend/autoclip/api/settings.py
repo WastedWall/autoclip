@@ -32,7 +32,7 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         }
         | {
             name: config.get_secret(name, settings) is not None
-            for name in (config.HF_TOKEN_KEY, config.YOUTUBE_KEY)
+            for name in (config.HF_TOKEN_KEY, config.YOUTUBE_KEY, config.OPENAI_RESEARCH_KEY)
         },
     )
 
@@ -89,7 +89,12 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
 @router.put("/settings/secrets", status_code=204)
 async def put_secret(payload: SecretIn) -> None:
     """Store an API key or token. Values are write-only — never read back."""
-    valid = (*config.KEYED_PROVIDERS, config.HF_TOKEN_KEY, config.YOUTUBE_KEY)
+    valid = (
+        *config.KEYED_PROVIDERS,
+        config.HF_TOKEN_KEY,
+        config.YOUTUBE_KEY,
+        config.OPENAI_RESEARCH_KEY,
+    )
     if payload.key not in valid:
         raise HTTPException(
             status_code=400, detail=f"Unknown secret. Expected one of: {', '.join(valid)}"

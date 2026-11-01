@@ -1,15 +1,16 @@
 """Post kits: the title and caption for posting a clip.
 
-The local model writes from the transcript, the campaign brief, and the approach
-and keywords the user chose. Research results never reach it (see ``research``).
-The disclosure and required tags are added here in code, so they can't be dropped
-or reworded by the model.
+The local model reads the OpenAI report and suggests an approach per clip. The user
+picks one and sets the keywords, then the model writes the title and caption. YouTube
+results never reach it (see ``research``). The disclosure and required tags are added
+here in code, so they can't be dropped or reworded by the model.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from .providers import DetectionConfig, LLMProvider, ProviderError
 from .providers.base import extract_json_object, load_prompt
@@ -66,11 +67,45 @@ async def suggest_topic(provider: LLMProvider, clip_text: str) -> str:
     return topic.strip()
 
 
+async def suggest_approaches(
+    provider: LLMProvider, *, clip_text: str, report: str
+) -> list[dict[str, Any]]:
+    """Fit the report to one clip: one suggestion per approach, in a fixed order."""
+    user = f"SEO report:\n{report}\n\nClip transcript:\n{clip_text}"
+    raw = await provider._complete(
+        load_prompt("post_approaches_v1"), user, DetectionConfig(temperature=0.4)
+    )
+    try:
+        items = extract_json_object(raw).get("approaches")
+    except ValueError as exc:
+        raise ProviderError("The model returned no approaches.") from exc
+    if not isinstance(items, list):
+        raise ProviderError("The model returned no approaches.")
+
+    by_key = {item.get("key"): item for item in items if isinstance(item, dict)}
+    suggestions = []
+    for key in APPROACHES:
+        item = by_key.get(key)
+        if item is None or not isinstance(item.get("headline"), str):
+            raise ProviderError("The model left out an approach.")
+        keywords = item.get("keywords")
+        suggestions.append(
+            {
+                "key": key,
+                "headline": item["headline"].strip(),
+                "keywords": [str(k) for k in keywords] if isinstance(keywords, list) else [],
+                "reason": str(item.get("reason") or ""),
+            }
+        )
+    return suggestions
+
+
 async def write_kit(
     provider: LLMProvider,
     *,
     clip_text: str,
     brief: str,
+    report: str,
     approach: str,
     keywords: str,
     brand: str,
@@ -79,7 +114,8 @@ async def write_kit(
     """Write a kit for the approach and keywords the user chose."""
     user = (
         f"Approach: {approach}\nKeywords: {keywords or 'none'}\n\n"
-        f"Campaign brief:\n{brief or 'none'}\n\nClip transcript:\n{clip_text}"
+        f"Campaign brief:\n{brief or 'none'}\n\nSEO report:\n{report or 'none'}\n\n"
+        f"Clip transcript:\n{clip_text}"
     )
     raw = await provider._complete(
         load_prompt("post_kit_v1"), user, DetectionConfig(temperature=0.4)

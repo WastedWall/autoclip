@@ -253,11 +253,24 @@ export interface PostRow {
   post: Post | null
 }
 
-/** A live report, shown unchanged with Google's suggestions. Never stored. */
-export interface GeminiReport {
+/** A live OpenAI report. Citations must stay visible and clickable. */
+export interface Report {
   text: string
-  suggestions_html: string
-  sources: { title: string; url: string }[]
+  citations: { title: string; url: string; start: number; end: number }[]
+}
+
+export interface Approach {
+  key: string
+  headline: string
+  keywords: string[]
+  reason: string
+}
+
+export interface PostKitState {
+  report: Report | null
+  approaches: Approach[]
+  kit: PostKit | null
+  posts: Post[]
 }
 
 export interface YouTubeResult {
@@ -361,23 +374,22 @@ export const api = {
   campaignReading: (id: string) =>
     request<{ lines: string[] }>(`/api/campaigns/${id}/reading`, { method: 'POST' }),
 
-  getPostKit: (clipId: string) =>
-    request<{ kit: PostKit | null; posts: Post[] }>(`/api/clips/${clipId}/post-kit`),
+  getPostKit: (clipId: string) => request<PostKitState>(`/api/clips/${clipId}/post-kit`),
 
   writePostKit: (clipId: string, approach: string, keywords: string) =>
-    request<{ kit: PostKit | null; posts: Post[] }>(`/api/clips/${clipId}/post-kit`, {
+    request<PostKitState>(`/api/clips/${clipId}/post-kit`, {
       method: 'POST',
       body: JSON.stringify({ approach, keywords }),
     }),
 
-  suggestTopic: (clipId: string) =>
-    request<{ topic: string }>(`/api/clips/${clipId}/topic`, { method: 'POST' }),
-
-  researchGemini: (topic: string) =>
-    request<GeminiReport>('/api/research/gemini', {
+  researchClip: (clipId: string, topic: string) =>
+    request<PostKitState>(`/api/clips/${clipId}/research`, {
       method: 'POST',
       body: JSON.stringify({ topic }),
     }),
+
+  suggestTopic: (clipId: string) =>
+    request<{ topic: string }>(`/api/clips/${clipId}/topic`, { method: 'POST' }),
 
   researchYouTube: (topic: string) =>
     request<YouTubeResult[]>('/api/research/youtube', {

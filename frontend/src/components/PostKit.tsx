@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 
 import {
   api,
+  type Approach,
   type Clip,
-  type GeminiReport,
   type Post,
   type PostKit as Kit,
+  type Report,
   type YouTubeResult,
 } from '../api'
 
@@ -65,14 +66,16 @@ const PLATFORMS = [
 /**
  * Everything needed to post one clip by hand.
  *
- * Research results are shown as they come and are never stored or sent to a
- * model, which is what Google's and YouTube's terms require. The user reads
- * them, then picks an approach and types keywords, and only that reaches Qwen.
+ * OpenAI's report goes to Qwen, which suggests an approach per clip, and the
+ * user makes the final choice. YouTube results are shown only: YouTube's terms
+ * forbid modifying them or deriving new data from them.
  */
 export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error) => void }) {
   const [topic, setTopic] = useState('')
   const [approach, setApproach] = useState('search')
   const [keywords, setKeywords] = useState('')
+  const [report, setReport] = useState<Report | null>(null)
+  const [approaches, setApproaches] = useState<Approach[]>([])
   const [kit, setKit] = useState<Kit | null>(null)
   const [posts, setPosts] = useState<Post[]>([])
   const [writing, setWriting] = useState(false)
@@ -81,11 +84,16 @@ export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error)
     api
       .getPostKit(clip.id)
       .then((state) => {
+        setReport(state.report)
+        setApproaches(state.approaches)
         setKit(state.kit)
         setPosts(state.posts)
         if (state.kit) {
           setApproach(state.kit.approach)
           setKeywords(state.kit.keywords)
+        } else if (state.approaches.length > 0) {
+          setApproach(state.approaches[0].key)
+          setKeywords(state.approaches[0].keywords.join(', '))
         }
       })
       .catch(onError)
@@ -94,6 +102,12 @@ export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error)
       .then((suggested) => setTopic(suggested.topic))
       .catch(() => undefined)
   }, [clip.id, onError])
+
+  const pick = (key: string) => {
+    setApproach(key)
+    const suggestion = approaches.find((item) => item.key === key)
+    if (suggestion) setKeywords(suggestion.keywords.join(', '))
+  }
 
   const write = async () => {
     setWriting(true)
@@ -110,17 +124,31 @@ export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error)
     <section aria-label="Post kit" className="space-y-8">
       <p className="eyebrow border-b border-ink-800 pb-2">Post kit</p>
 
-      <Research topic={topic} onTopic={setTopic} onError={onError} />
+      <Research
+        clipId={clip.id}
+        topic={topic}
+        report={report}
+        onTopic={setTopic}
+        onResearched={(nextReport, nextApproaches) => {
+          setReport(nextReport)
+          setApproaches(nextApproaches)
+          const suggestion = nextApproaches.find((item) => item.key === approach)
+          if (suggestion) setKeywords(suggestion.keywords.join(', '))
+        }}
+        onError={onError}
+      />
 
       <div>
         <p className="eyebrow">Choose an approach</p>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          {APPROACHES.map((item) => (
+          {APPROACHES.map((item) => {
+            const suggestion = approaches.find((option) => option.key === item.key)
+            return (
             <button
               key={item.key}
               type="button"
               aria-pressed={item.key === approach}
-              onClick={() => setApproach(item.key)}
+              onClick={() => pick(item.key)}
               className={[
                 'border p-3 text-left transition-colors duration-200',
                 item.key === approach
@@ -129,9 +157,24 @@ export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error)
               ].join(' ')}
             >
               <span className="block text-sm font-medium text-ink-100">{item.label}</span>
-              <span className="mt-1 block text-xs leading-snug text-ink-400">{item.hint}</span>
+              {suggestion ? (
+                <>
+                  <span className="mt-1 block text-sm leading-snug text-ink-200">
+                    {suggestion.headline}
+                  </span>
+                  <span className="mt-2 block text-xs leading-snug text-ink-400">
+                    {suggestion.keywords.join(', ')}
+                  </span>
+                  <span className="mt-2 block text-xs leading-snug text-ink-300">
+                    {suggestion.reason}
+                  </span>
+                </>
+              ) : (
+                <span className="mt-1 block text-xs leading-snug text-ink-400">{item.hint}</span>
+              )}
             </button>
-          ))}
+            )
+          })}
         </div>
 
         <label className="mt-4 block">
@@ -169,22 +212,39 @@ export function PostKit({ clip, onError }: { clip: Clip; onError: (error: Error)
 }
 
 function Research({
+  clipId,
   topic,
+  report,
   onTopic,
+  onResearched,
   onError,
 }: {
+  clipId: string
   topic: string
+  report: Report | null
   onTopic: (topic: string) => void
+  onResearched: (report: Report | null, approaches: Approach[]) => void
   onError: (error: Error) => void
 }) {
-  const [busy, setBusy] = useState<'gemini' | 'youtube' | null>(null)
-  const [report, setReport] = useState<GeminiReport | null>(null)
+  const [busy, setBusy] = useState<'report' | 'youtube' | null>(null)
   const [videos, setVideos] = useState<YouTubeResult[] | null>(null)
 
-  const run = async (kind: 'gemini' | 'youtube', search: () => Promise<void>) => {
-    setBusy(kind)
+  const runReport = async () => {
+    setBusy('report')
     try {
-      await search()
+      const state = await api.researchClip(clipId, topic.trim())
+      onResearched(state.report, state.approaches)
+    } catch (err) {
+      onError(err as Error)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const runYouTube = async () => {
+    setBusy('youtube')
+    try {
+      setVideos(await api.researchYouTube(topic.trim()))
     } catch (err) {
       onError(err as Error)
     } finally {
@@ -195,7 +255,7 @@ function Research({
   return (
     <div>
       <label className="block">
-        <span className="eyebrow">Research topic. Only this is sent to Google</span>
+        <span className="eyebrow">Research topic. Only this leaves your PC</span>
         <input
           className="field mt-1 text-sm"
           value={topic}
@@ -208,19 +268,15 @@ function Research({
           type="button"
           className="btn btn-ghost"
           disabled={busy !== null || topic.trim().length < 2}
-          onClick={() =>
-            run('gemini', async () => setReport(await api.researchGemini(topic.trim())))
-          }
+          onClick={runReport}
         >
-          {busy === 'gemini' ? 'Researching…' : 'Research with Gemini'}
+          {busy === 'report' ? 'Researching…' : 'Research with OpenAI'}
         </button>
         <button
           type="button"
           className="btn btn-ghost"
           disabled={busy !== null || topic.trim().length < 2}
-          onClick={() =>
-            run('youtube', async () => setVideos(await api.researchYouTube(topic.trim())))
-          }
+          onClick={runYouTube}
         >
           {busy === 'youtube' ? 'Searching…' : 'Search YouTube'}
         </button>
@@ -228,40 +284,16 @@ function Research({
 
       {report && (
         <div className="mt-5 border-l-2 border-ink-700 pl-4">
-          <p className="eyebrow">Live report from Gemini · Read it, then choose below</p>
+          <p className="eyebrow">SEO report from OpenAI</p>
           <p className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-ink-200">
-            {report.text}
+            <CitedText report={report} />
           </p>
-          {report.suggestions_html && (
-            <iframe
-              title="Google Search suggestions"
-              srcDoc={report.suggestions_html}
-              sandbox="allow-popups allow-popups-to-escape-sandbox"
-              className="mt-3 h-24 w-full border-0"
-            />
-          )}
-          {report.sources.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {report.sources.map((source) => (
-                <li key={source.url}>
-                  <a
-                    href={source.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-ink-400 underline underline-offset-4 hover:text-ink-200"
-                  >
-                    {source.title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       )}
 
       {videos && (
         <div className="mt-5 border-l-2 border-ink-700 pl-4">
-          <p className="eyebrow">From YouTube</p>
+          <p className="eyebrow">From YouTube. For you to read</p>
           {videos.length === 0 && <p className="mt-3 text-sm text-ink-400">No results.</p>}
           <ul className="mt-3 space-y-2">
             {videos.map((video) => (
@@ -283,6 +315,36 @@ function Research({
         </div>
       )}
     </div>
+  )
+}
+
+/** The report with clickable source links inline, as OpenAI requires. */
+function CitedText({ report }: { report: Report }) {
+  const citations = [...report.citations].sort((a, b) => a.start - b.start)
+  let position = 0
+  const parts = citations.map((citation) => {
+    const text = report.text.slice(position, citation.start)
+    position = Math.max(position, citation.end)
+    return (
+      <span key={`${citation.url}${citation.start}`}>
+        {text}
+        <a
+          href={citation.url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-sodium-500 underline underline-offset-2"
+        >
+          [{citation.title}]
+        </a>
+      </span>
+    )
+  })
+
+  return (
+    <>
+      {parts}
+      {report.text.slice(position)}
+    </>
   )
 }
 

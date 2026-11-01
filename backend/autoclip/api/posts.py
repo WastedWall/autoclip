@@ -1,4 +1,4 @@
-"""Post kits, research for the user to read, and the record of what was posted."""
+"""Post kits, SEO research, and the record of what was posted."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from ..db.models import Post, new_id
 from ..providers import ProviderError, build_provider
 from .clips import clip_words
 from .schemas import (
-    GeminiReportOut,
     PostIn,
     PostKitIn,
     PostKitStateOut,
@@ -53,12 +52,21 @@ def _secret(name: str, label: str) -> str:
     return key
 
 
+async def _state(clip_id: str) -> PostKitStateOut:
+    data = await asyncio.to_thread(store.get_post_kit, clip_id) or {}
+    posts = await asyncio.to_thread(store.list_clip_posts, clip_id)
+    return PostKitStateOut(
+        report=data.get("report"),
+        approaches=data.get("approaches", []),
+        kit=data.get("kit"),
+        posts=[PostOut.of(post) for post in posts],
+    )
+
+
 @router.get("/clips/{clip_id}/post-kit", response_model=PostKitStateOut)
 async def get_post_kit(clip_id: str) -> PostKitStateOut:
     await _clip_and_job(clip_id)
-    kit = await asyncio.to_thread(store.get_post_kit, clip_id)
-    posts = await asyncio.to_thread(store.list_clip_posts, clip_id)
-    return PostKitStateOut(kit=kit, posts=[PostOut.of(post) for post in posts])
+    return await _state(clip_id)
 
 
 @router.post("/clips/{clip_id}/topic", response_model=TopicOut)
@@ -71,16 +79,39 @@ async def suggest_topic(clip_id: str) -> TopicOut:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.post("/clips/{clip_id}/research", response_model=PostKitStateOut)
+async def research_clip(clip_id: str, payload: TopicIn) -> PostKitStateOut:
+    """Get a live report from OpenAI, then let Qwen fit it to this clip."""
+    await _clip_and_job(clip_id)
+    key = _secret(config.OPENAI_RESEARCH_KEY, "OpenAI research")
+    try:
+        report = await asyncio.to_thread(research.openai_report, payload.topic.strip(), key)
+        approaches = await postkit.suggest_approaches(
+            build_provider(settings=config.load()),
+            clip_text=await _clip_text(clip_id),
+            report=report.text,
+        )
+    except (research.ResearchError, ProviderError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    data = await asyncio.to_thread(store.get_post_kit, clip_id) or {}
+    updated = data | {"report": asdict(report), "approaches": approaches}
+    await asyncio.to_thread(store.save_post_kit, clip_id, updated)
+    return await _state(clip_id)
+
+
 @router.post("/clips/{clip_id}/post-kit", response_model=PostKitStateOut)
 async def write_post_kit(clip_id: str, payload: PostKitIn) -> PostKitStateOut:
     """Write a kit from the approach and keywords the user chose."""
     _, job = await _clip_and_job(clip_id)
     clips = job.settings.get("clips", {})
+    data = await asyncio.to_thread(store.get_post_kit, clip_id) or {}
     try:
         kit = await postkit.write_kit(
             build_provider(settings=config.load()),
             clip_text=await _clip_text(clip_id),
             brief=clips.get("brief", ""),
+            report=(data.get("report") or {}).get("text", ""),
             approach=payload.approach,
             keywords=payload.keywords.strip(),
             brand=clips.get("disclosure_brand", ""),
@@ -89,19 +120,8 @@ async def write_post_kit(clip_id: str, payload: PostKitIn) -> PostKitStateOut:
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    await asyncio.to_thread(store.save_post_kit, clip_id, kit.to_dict())
-    return await get_post_kit(clip_id)
-
-
-@router.post("/research/gemini", response_model=GeminiReportOut)
-async def gemini_research(payload: TopicIn) -> GeminiReportOut:
-    """A live report for the user to read. It is never stored or sent to a model."""
-    key = _secret("gemini", "Gemini")
-    try:
-        report = await asyncio.to_thread(research.gemini_report, payload.topic.strip(), key)
-    except research.ResearchError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return GeminiReportOut(**asdict(report))
+    await asyncio.to_thread(store.save_post_kit, clip_id, data | {"kit": kit.to_dict()})
+    return await _state(clip_id)
 
 
 @router.post("/research/youtube", response_model=list[YouTubeResultOut])

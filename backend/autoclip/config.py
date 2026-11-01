@@ -42,6 +42,8 @@ KEYED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini")
 #: Extra secrets that aren't tied to a provider.
 HF_TOKEN_KEY = "huggingface_token"
 YOUTUBE_KEY = "youtube"
+#: Kept apart from the "openai" provider key, which points at the local Qwen server.
+OPENAI_RESEARCH_KEY = "openai_research"
 
 
 class ProviderSettings(BaseModel):

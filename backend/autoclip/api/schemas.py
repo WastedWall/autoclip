@@ -199,15 +199,23 @@ class TopicOut(BaseModel):
     topic: str
 
 
-class WebSourceOut(BaseModel):
+class CitationOut(BaseModel):
     title: str
     url: str
+    start: int
+    end: int
 
 
-class GeminiReportOut(BaseModel):
+class ReportOut(BaseModel):
     text: str
-    suggestions_html: str
-    sources: list[WebSourceOut]
+    citations: list[CitationOut]
+
+
+class ApproachOut(BaseModel):
+    key: str
+    headline: str
+    keywords: list[str]
+    reason: str
 
 
 class YouTubeResultOut(BaseModel):
@@ -254,6 +262,8 @@ class PostOut(BaseModel):
 
 
 class PostKitStateOut(BaseModel):
+    report: ReportOut | None
+    approaches: list[ApproachOut]
     kit: dict[str, Any] | None
     posts: list[PostOut]
 

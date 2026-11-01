@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from collections.abc import Iterator
@@ -158,6 +159,7 @@ class TestWriteKit:
         values = {
             "clip_text": "the clip words",
             "brief": "Rule one",
+            "report": "The report",
             "approach": "search",
             "keywords": "learn English",
             "brand": "Acme",
@@ -173,13 +175,14 @@ class TestWriteKit:
         assert "@acme" in kit.caption
         assert kit.flags == ["Check the tag"]
 
-    async def test_model_gets_only_the_users_choice(self) -> None:
+    async def test_model_gets_the_choice_and_the_report(self) -> None:
         provider = FakeProvider(self.ANSWER)
 
         await self.write(provider)
 
         assert "Approach: search" in provider.prompts[0]
         assert "Keywords: learn English" in provider.prompts[0]
+        assert "The report" in provider.prompts[0]
 
     async def test_unusable_answer_is_a_clear_error(self) -> None:
         with pytest.raises(postkit.ProviderError):
@@ -206,49 +209,52 @@ class TestResearch:
         monkeypatch.setattr(research.urllib.request, "urlopen", urlopen)
         return requests
 
-    def test_gemini_report_is_returned_unchanged(self, monkeypatch) -> None:
-        answer = {
-            "candidates": [
-                {
-                    "content": {"parts": [{"text": "## Report\n"}, {"text": "Details"}]},
-                    "groundingMetadata": {
-                        "searchEntryPoint": {"renderedContent": "<div>chips</div>"},
-                        "groundingChunks": [{"web": {"uri": "https://a.example", "title": "A"}}],
-                    },
-                }
+    def report_answer(self, text: str = "Report", notes: list | None = None) -> dict:
+        part = {"type": "output_text", "text": text, "annotations": notes or []}
+        return {
+            "output": [
+                {"type": "web_search_call", "action": {"type": "search"}},
+                {"type": "message", "content": [part]},
             ]
         }
-        requests = self.stub(monkeypatch, answer)
 
-        report = research.gemini_report("learning English", "secret")
+    def test_openai_report_keeps_text_and_citations(self, monkeypatch) -> None:
+        note = {
+            "type": "url_citation",
+            "url": "https://a.example",
+            "title": "A",
+            "start_index": 0,
+            "end_index": 6,
+        }
+        requests = self.stub(monkeypatch, self.report_answer("Report details", [note]))
 
-        assert report.text == "## Report\nDetails"
-        assert report.suggestions_html == "<div>chips</div>"
-        assert report.sources[0].url == "https://a.example"
+        report = research.openai_report("learning English", "secret")
+
+        assert report.text == "Report details"
+        assert report.citations == [research.Citation("A", "https://a.example", 0, 6)]
+        body = json.loads(requests[0].data)
+        assert "learning English" in body["input"]
+        assert body["tools"] == [{"type": "web_search"}]
+        assert body["max_tool_calls"] == research.MAX_SEARCHES
+        assert body["reasoning"] == {"effort": "low"}
         assert "secret" not in requests[0].full_url
-        assert "learning English" in json.loads(requests[0].data)["contents"][0]["parts"][0]["text"]
 
-    def test_empty_source_title_falls_back_to_the_link(self, monkeypatch) -> None:
-        metadata = {"groundingChunks": [{"web": {"uri": "https://a.example", "title": ""}}]}
-        answer = {
-            "candidates": [
-                {"content": {"parts": [{"text": "Report"}]}, "groundingMetadata": metadata}
-            ]
-        }
-        self.stub(monkeypatch, answer)
+    def test_empty_citation_title_falls_back_to_the_link(self, monkeypatch) -> None:
+        note = {"type": "url_citation", "url": "https://a.example", "title": "", "end_index": 3}
+        self.stub(monkeypatch, self.report_answer("Report", [note]))
 
-        assert research.gemini_report("topic", "secret").sources[0].title == "https://a.example"
+        assert research.openai_report("topic", "secret").citations[0].title == "https://a.example"
 
     def test_incomplete_youtube_items_are_skipped(self, monkeypatch) -> None:
         self.stub(monkeypatch, {"items": [{"id": {"videoId": "a"}}]})
 
         assert research.youtube_results("topic", "secret") == []
 
-    def test_gemini_without_text_is_an_error(self, monkeypatch) -> None:
-        self.stub(monkeypatch, {"candidates": []})
+    def test_empty_report_is_an_error(self, monkeypatch) -> None:
+        self.stub(monkeypatch, {"output": []})
 
         with pytest.raises(research.ResearchError):
-            research.gemini_report("topic", "secret")
+            research.openai_report("topic", "secret")
 
     def test_youtube_keeps_titles_and_order(self, monkeypatch) -> None:
         search = {
@@ -277,10 +283,22 @@ class TestResearch:
         monkeypatch.setattr(research.urllib.request, "urlopen", urlopen)
 
         with pytest.raises(research.ResearchError) as error:
-            research.gemini_report("topic", "secret")
+            research.openai_report("topic", "secret")
 
         assert "secret" not in str(error.value)
         assert "403" in str(error.value)
+
+
+class TestYouTubeQuota:
+    def test_quota_error_is_recognised(self, monkeypatch) -> None:
+        def urlopen(request, timeout):
+            body = io.BytesIO(b'{"error": {"errors": [{"reason": "quotaExceeded"}]}}')
+            raise HTTPError(request.full_url, 403, "Forbidden", {}, body)
+
+        monkeypatch.setattr(research.urllib.request, "urlopen", urlopen)
+
+        with pytest.raises(research.ResearchError, match="quota"):
+            research.youtube_results("topic", "secret")
 
 
 class TestQuota:
@@ -291,15 +309,15 @@ class TestQuota:
 
         monkeypatch.setattr(research.urllib.request, "urlopen", urlopen)
 
-    def test_gemini_explains_billing(self) -> None:
-        with pytest.raises(research.ResearchError, match="billing"):
-            research.gemini_report("topic", "secret")
+    def test_openai_points_at_the_credit(self) -> None:
+        with pytest.raises(research.ResearchError, match="credit"):
+            research.openai_report("topic", "secret")
 
-    def test_youtube_does_not_mention_gemini(self) -> None:
+    def test_youtube_does_not_mention_openai(self) -> None:
         with pytest.raises(research.ResearchError) as error:
             research.youtube_results("topic", "secret")
 
-        assert "Gemini" not in str(error.value)
+        assert "OpenAI" not in str(error.value)
 
 
 class TestPostKitApi:
@@ -350,15 +368,63 @@ class TestPostKitApi:
         assert response.status_code == 400
         assert "Settings" in response.json()["detail"]
 
-    def test_gemini_report_is_not_stored(self, client, clip, monkeypatch) -> None:
+    def test_report_flows_into_approaches_and_the_kit(self, client, clip, monkeypatch) -> None:
+        answers = iter(
+            [
+                json.dumps(
+                    {
+                        "approaches": [
+                            {"key": key, "headline": key, "keywords": ["tips"], "reason": "r"}
+                            for key in postkit.APPROACHES
+                        ]
+                    }
+                ),
+                TestWriteKit.ANSWER,
+            ]
+        )
+        provider = FakeProvider("")
+
+        async def complete(system, user, config):
+            provider.prompts.append(user)
+            return next(answers)
+
+        provider._complete = complete
+        monkeypatch.setattr("autoclip.api.posts.build_provider", lambda settings: provider)
+        monkeypatch.setattr("autoclip.api.posts.clip_words", _words)
         monkeypatch.setattr(config, "get_secret", lambda name: "secret")
-        report = research.GeminiReport(text="Live report")
-        monkeypatch.setattr(research, "gemini_report", lambda topic, key: report)
+        report = research.Report(text="Live report")
+        monkeypatch.setattr(research, "openai_report", lambda topic, key: report)
 
-        body = client.post("/api/research/gemini", json={"topic": "learning"}).json()
+        body = client.post(f"/api/clips/{clip.id}/research", json={"topic": "learning"}).json()
 
-        assert body["text"] == "Live report"
-        assert client.get(f"/api/clips/{clip.id}/post-kit").json()["kit"] is None
+        assert body["report"]["text"] == "Live report"
+        assert [item["key"] for item in body["approaches"]] == list(postkit.APPROACHES)
+        assert "Live report" in provider.prompts[0]
+
+        state = client.post(
+            f"/api/clips/{clip.id}/post-kit", json={"approach": "search", "keywords": "tips"}
+        ).json()
+
+        assert "Live report" in provider.prompts[1]
+        assert state["report"]["text"] == "Live report"
+        assert state["kit"]["approach"] == "search"
+
+    def test_research_needs_the_key(self, client, clip, monkeypatch) -> None:
+        monkeypatch.setattr(config, "get_secret", lambda name: None)
+
+        response = client.post(f"/api/clips/{clip.id}/research", json={"topic": "learning"})
+
+        assert response.status_code == 400
+        assert "Settings" in response.json()["detail"]
+
+    def test_research_key_is_not_the_qwen_key(self) -> None:
+        assert config.OPENAI_RESEARCH_KEY != "openai"
+
+    def test_missing_approach_is_a_clear_error(self) -> None:
+        answer = json.dumps({"approaches": [{"key": "search", "headline": "x"}]})
+
+        with pytest.raises(postkit.ProviderError, match="left out"):
+            asyncio.run(postkit.suggest_approaches(FakeProvider(answer), clip_text="c", report="r"))
 
     def test_reveal_needs_an_export(self, client, clip) -> None:
         assert client.post(f"/api/clips/{clip.id}/reveal").status_code == 409

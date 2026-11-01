@@ -8,6 +8,7 @@ const SECRET_LABELS: Record<string, string> = {
   openai: 'OpenAI-compatible API key',
   gemini: 'Google Gemini API key',
   youtube: 'YouTube Data API key',
+  openai_research: 'OpenAI research API key',
   huggingface_token: 'HuggingFace token',
 }
 

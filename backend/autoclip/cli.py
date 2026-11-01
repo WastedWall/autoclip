@@ -357,7 +357,10 @@ def config_path_cmd() -> None:
 def config_set_secret(
     key: str = typer.Argument(
         ...,
-        help="Provider name (anthropic, openai, gemini), 'huggingface_token' or 'youtube'.",
+        help=(
+            "Provider name (anthropic, openai, gemini), 'huggingface_token', 'youtube' "
+            "or 'openai_research'."
+        ),
     ),
 ) -> None:
     """Store an API key or token. The value is prompted for, never passed as an argument.
@@ -365,7 +368,12 @@ def config_set_secret(
     Prompting rather than accepting a flag keeps the secret out of your shell
     history and out of the process list.
     """
-    valid = (*config.KEYED_PROVIDERS, config.HF_TOKEN_KEY, config.YOUTUBE_KEY)
+    valid = (
+        *config.KEYED_PROVIDERS,
+        config.HF_TOKEN_KEY,
+        config.YOUTUBE_KEY,
+        config.OPENAI_RESEARCH_KEY,
+    )
     if key not in valid:
         console.print(f"[red]Unknown secret '{key}'.[/red] Expected one of: {', '.join(valid)}")
         raise typer.Exit(2)
