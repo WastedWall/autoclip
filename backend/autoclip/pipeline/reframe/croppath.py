@@ -23,9 +23,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-#: Cap on keyframes per segment. Beyond this the expression gets unwieldy and
-#: the extra precision is invisible — the path is smoothed and dead-zoned
-#: upstream, so adjacent keyframes differ by well under a pixel.
+#: Cap on keyframes per segment. Beyond this the expression gets unwieldy. The
+#: camera plan only passes it past 22 moves in one shot, when thinning takes over.
 MAX_KEYFRAMES_PER_SEGMENT = 48
 
 #: Movement below this many pixels is dropped during decimation.
@@ -303,4 +302,5 @@ def segment_crop_filter(segment: CropSegment, *, relative: bool = True) -> str:
     x_expr = x_expr.replace(",", "\\,")
     y_expr = y_expr.replace(",", "\\,")
 
-    return f"crop=w={width}:h={height}:x='{x_expr}':y='{y_expr}'"
+    # Without exact, crop snaps to even pixels, which reads as stepping on a move.
+    return f"crop=w={width}:h={height}:x='{x_expr}':y='{y_expr}':exact=1"

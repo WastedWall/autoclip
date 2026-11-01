@@ -1,4 +1,4 @@
-"""Crop path construction, smoothing, and tracking.
+"""Crop path construction, camera planning, and tracking.
 
 These are the acceptance-bar mechanics from PRD 6.4 expressed as unit tests:
 jitter suppression, no interpolation across cuts, and correct crop geometry.
@@ -9,7 +9,8 @@ from __future__ import annotations
 import math
 
 import pytest
-from autoclip.pipeline.reframe import croppath, smoothing
+from autoclip.pipeline.reframe import ReframeConfig, _track_segment, croppath
+from autoclip.pipeline.reframe.camera import plan_camera, value_at
 from autoclip.pipeline.reframe.croppath import (
     CropKeyframe,
     CropSegment,
@@ -76,55 +77,110 @@ class TestCentreCrop:
         assert path.duration_s == 42.5
 
 
-class TestOneEuroFilter:
-    def test_suppresses_stationary_jitter(self) -> None:
-        # A still subject with +/-5px detection noise must not move the crop.
-        samples = [(i * 0.2, 500 + (5 if i % 2 else -5)) for i in range(40)]
+def relocation(at_s: float, distance: float = 300.0, duration_s: float = 30.0) -> list:
+    """A subject swaying gently who moves to a new spot once."""
+    samples = []
+    for i in range(int(duration_s * 5)):
+        t = i * 0.2
+        samples.append((t, 500 + math.sin(t) * 40 + (distance if t >= at_s else 0)))
+    return samples
 
-        smoothed = smoothing.smooth_series(samples, smoothing.SmoothingConfig())
-        values = [v for _, v in smoothed[5:]]
 
-        assert max(values) - min(values) < 3.0
+class TestPlanCamera:
+    def test_head_sway_never_moves_the_frame(self) -> None:
+        samples = [(i * 0.2, 500 + math.sin(i * 0.2) * 40) for i in range(150)]
 
-    def test_follows_a_genuine_pan(self) -> None:
-        # A real 400px move over 8s must actually be followed.
-        samples = [(i * 0.2, 300 + i * 10) for i in range(40)]
+        assert len(plan_camera(samples, 90.0)) == 1
 
-        smoothed = smoothing.smooth_series(samples, smoothing.SmoothingConfig())
+    def test_detection_glitch_never_moves_the_frame(self) -> None:
+        samples = [(i * 0.2, 5000.0 if i == 20 else 500.0) for i in range(60)]
 
-        assert smoothed[-1][1] > 600
+        assert plan_camera(samples, 90.0) == [(0.0, 500.0)]
 
-    def test_dead_zone_holds_small_movements(self) -> None:
-        config = smoothing.SmoothingConfig(dead_zone_px=20.0)
-        samples = [(i * 0.2, 500 + i * 0.5) for i in range(10)]
+    def test_passing_lean_never_moves_the_frame(self) -> None:
+        samples = [(i * 0.2, 800.0 if 40 <= i < 50 else 500.0) for i in range(100)]
 
-        smoothed = smoothing.smooth_series(samples, config)
+        assert len(plan_camera(samples, 90.0)) == 1
 
-        assert smoothed[0][1] == pytest.approx(smoothed[-1][1], abs=1.0)
+    def test_real_relocation_makes_one_move(self) -> None:
+        plan = plan_camera(relocation(at_s=15.0), 90.0)
 
-    def test_velocity_is_clamped(self) -> None:
-        # A detection glitch must never whip the frame across the shot.
-        config = smoothing.SmoothingConfig(max_velocity_px_s=100.0, dead_zone_px=1.0)
-        samples = [(0.0, 0.0), (0.2, 0.0), (0.4, 5000.0), (0.6, 5000.0)]
+        assert plan[-1][1] - plan[0][1] == pytest.approx(300, abs=40)
+        assert plan[-1][0] - plan[1][0] == pytest.approx(1.0)
+        assert plan[1][0] == pytest.approx(14.5, abs=1.0)
 
-        smoothed = smoothing.smooth_series(samples, config)
+    def test_move_eases_in_and_out(self) -> None:
+        plan = plan_camera(relocation(at_s=15.0), 90.0)[1:]
+        speeds = [(v1 - v0) / (t1 - t0) for (t0, v0), (t1, v1) in zip(plan, plan[1:], strict=False)]
 
-        for (t0, v0), (t1, v1) in zip(smoothed, smoothed[1:], strict=False):
-            assert abs(v1 - v0) <= 100.0 * (t1 - t0) + 1e-6
+        assert speeds == sorted(speeds[:3]) + sorted(speeds[2:], reverse=True)[1:]
+        assert max(speeds) > 2 * speeds[0]
 
-    def test_single_sample_passes_through(self) -> None:
-        assert smoothing.smooth_series([(0.0, 100.0)]) == [(0.0, 100.0)]
+    def test_frame_holds_between_moves(self) -> None:
+        samples = [(i * 0.2, 300.0 * (i // 25)) for i in range(125)]
 
-    def test_empty_input(self) -> None:
-        assert smoothing.smooth_series([]) == []
+        plan = plan_camera(samples, 90.0)
 
-    def test_filter_is_deterministic(self) -> None:
-        samples = [(i * 0.2, 300 + math.sin(i) * 50) for i in range(30)]
+        starts = [t0 for (t0, v0), (_, v1) in zip(plan, plan[1:], strict=False) if v0 == v1]
+        assert len(starts) == 4
+        for (t0, _), (t1, _) in zip(plan, plan[1:], strict=False):
+            assert t1 > t0
 
-        first = smoothing.smooth_series(samples)
-        second = smoothing.smooth_series(samples)
+    def test_short_clip_at_the_start_joins_the_next_position(self) -> None:
+        samples = [(i * 0.2, 800.0 if i < 5 else 500.0) for i in range(60)]
 
-        assert first == second
+        assert len(plan_camera(samples, 90.0)) == 1
+
+    def test_restless_subject_stays_inside_the_keyframe_budget(self) -> None:
+        samples = [(i * 0.2, 300.0 * ((i // 20) % 2)) for i in range(450)]
+
+        assert len(plan_camera(samples, 90.0)) <= croppath.MAX_KEYFRAMES_PER_SEGMENT
+
+    def test_single_sample(self) -> None:
+        assert plan_camera([(0.0, 100.0)], 90.0) == [(0.0, 100.0)]
+
+    def test_value_at_interpolates_and_holds_the_ends(self) -> None:
+        plan = [(1.0, 10.0), (3.0, 30.0)]
+
+        assert value_at(plan, 0.0) == 10.0
+        assert value_at(plan, 2.0) == 20.0
+        assert value_at(plan, 9.0) == 30.0
+
+
+class TestTrackSegment:
+    def build(self, cx: list[float]):
+        observations = [
+            FaceObservation(t=i * 0.2, cx=x, cy=500, width=150, height=200, eye_y=450, mar=0.05)
+            for i, x in enumerate(cx)
+        ]
+        tracks = build_tracks(observations)
+
+        return _track_segment(
+            tracks[0],
+            start_s=0.0,
+            end_s=len(cx) * 0.2,
+            source_w=1920,
+            source_h=1080,
+            crop_w=608,
+            crop_h=1080,
+            config=ReframeConfig(),
+        )
+
+    def test_swaying_subject_gets_a_static_frame(self) -> None:
+        segment = self.build([960 + math.sin(i * 0.2) * 40 for i in range(150)])
+
+        assert segment.is_static
+        assert segment.keyframes[0].x == pytest.approx(656, abs=30)
+
+    def test_relocating_subject_gets_keyframes_for_the_whole_segment(self) -> None:
+        walk = [600.0 + step * 25 for step in range(20)]
+        segment = self.build([600.0] * 65 + walk + [1100.0] * 65)
+
+        assert not segment.is_static
+        assert segment.keyframes[0].t == 0.0
+        assert segment.keyframes[-1].t == pytest.approx(30.0)
+        assert segment.keyframes[0].x == pytest.approx(296)
+        assert segment.keyframes[-1].x == pytest.approx(796)
 
 
 class TestAxisExpression:
@@ -212,7 +268,7 @@ class TestSegmentFilter:
             keyframes=[CropKeyframe(0.0, 657.0, 0.0)],
         )
 
-        assert segment_crop_filter(segment) == "crop=w=606:h=1080:x='657.0':y='0.0'"
+        assert segment_crop_filter(segment) == "crop=w=606:h=1080:x='657.0':y='0.0':exact=1"
 
     def test_moving_segment_uses_expressions(self) -> None:
         segment = CropSegment(

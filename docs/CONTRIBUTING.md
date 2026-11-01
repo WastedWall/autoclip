@@ -77,7 +77,7 @@ captions.
 
 **Reframe changes need the golden set.** The §6.4 acceptance bar — no visible
 jitter, no cut-off faces, speaker on screen ≥95% of speaking time — is a release
-gate. If you change smoothing, tracking, or strategy selection, run the golden
+gate. If you change the camera plan, tracking, or strategy selection, run the golden
 tests and say what moved.
 
 **Bias toward stillness.** In reframing, a locked frame that is slightly

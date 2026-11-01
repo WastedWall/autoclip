@@ -65,7 +65,7 @@ backend/autoclip/
     ├── captions.py   ASS generation and the four presets
     ├── export.py     the render
     ├── runner.py     stage orchestration and resume
-    └── reframe/      scenes, faces, tracker, speaker, smoothing, croppath
+    └── reframe/      scenes, faces, tracker, speaker, camera, croppath
 ```
 
 ## Load-bearing decisions

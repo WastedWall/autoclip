@@ -7,7 +7,7 @@ Pipeline for one clip:
 3. Link observations into per-person tracks.
 4. Map diarized speakers onto tracks once, then let turn boundaries drive framing.
 5. Per shot, pick a strategy — TRACK, WIDE, or GENERAL.
-6. Build a raw crop path, smooth it, and emit segments.
+6. Plan a mostly still camera over the raw crop path and emit segments.
 
 The quality bar is "never jarring": no visible jitter, no cut-off faces, the
 speaker on screen for essentially all of their speaking time. Every default here
@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .. import ffmpeg
 from ..transcript import Transcript
+from .camera import CameraConfig, plan_camera, value_at
 from .croppath import (
     CropKeyframe,
     CropPath,
@@ -33,7 +34,6 @@ from .croppath import (
 )
 from .faces import FaceDetectionUnavailable, FaceObservation, sample_faces
 from .scenes import Shot, detect_shots
-from .smoothing import SmoothingConfig, smooth_series
 from .speaker import assign_speakers, map_tracks_to_speakers
 from .tracker import FaceTrack, build_tracks
 
@@ -70,7 +70,7 @@ class ReframeConfig:
     aspect_w: int = 9
     aspect_h: int = 16
     sample_fps: float = 5.0
-    smoothing: SmoothingConfig | None = None
+    camera: CameraConfig | None = None
     #: Skip face detection entirely and centre-crop everything.
     centre_only: bool = False
 
@@ -270,7 +270,7 @@ def _track_segment(
     crop_h: int,
     config: ReframeConfig,
 ) -> CropSegment:
-    """Frame a single subject, tracking them or locking on if they barely move."""
+    """Frame a single subject with a camera that only moves when they really do."""
     observations = track.observations_between(start_s, end_s)
     if not observations:
         return _general_segment(
@@ -292,23 +292,20 @@ def _track_segment(
     ]
 
     mean_face_width = sum(o.width for o in observations) / len(observations)
-    spread_x = max(x for _, x, _ in raw) - min(x for _, x, _ in raw)
 
-    # A close-up, or a subject who barely moves, is better locked than tracked.
-    should_lock = (
-        mean_face_width > crop_w * LOCK_IF_FACE_WIDER_THAN
-        or spread_x < (config.smoothing or SmoothingConfig()).dead_zone_px
-    )
+    # A close-up is better locked than tracked.
+    should_lock = mean_face_width > crop_w * LOCK_IF_FACE_WIDER_THAN
 
     if should_lock or len(raw) < 3:
         x = sum(item[1] for item in raw) / len(raw)
         y = sum(item[2] for item in raw) / len(raw)
         keyframes = [CropKeyframe(t=start_s, x=x, y=y)]
     else:
-        smoothing = config.smoothing or SmoothingConfig()
-        xs = smooth_series([(t, x) for t, x, _ in raw], smoothing)
-        ys = smooth_series([(t, y) for t, _, y in raw], smoothing)
-        keyframes = [CropKeyframe(t=t, x=x, y=y) for (t, x), (_, y) in zip(xs, ys, strict=True)]
+        camera = config.camera or CameraConfig()
+        xs = plan_camera([(t, x) for t, x, _ in raw], crop_w * camera.safe_zone_ratio, camera)
+        ys = plan_camera([(t, y) for t, _, y in raw], crop_h * camera.safe_zone_ratio, camera)
+        times = sorted({t for t, _ in xs} | {t for t, _ in ys})
+        keyframes = [CropKeyframe(t=t, x=value_at(xs, t), y=value_at(ys, t)) for t in times]
         # Anchor the ends so the expression covers the whole segment.
         if keyframes[0].t > start_s:
             keyframes.insert(0, CropKeyframe(start_s, keyframes[0].x, keyframes[0].y))
