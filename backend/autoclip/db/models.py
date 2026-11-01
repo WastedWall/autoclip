@@ -207,3 +207,36 @@ class Export:
             size_bytes=row["size_bytes"],
             created_at=row["created_at"],
         )
+
+
+@dataclass
+class Post:
+    """One clip published on one platform."""
+
+    id: str
+    clip_id: str
+    platform: str
+    url: str
+    approach: str = ""
+    title: str = ""
+    caption: str = ""
+    views_48h: int | None = None
+    views_7d: int | None = None
+    submitted: bool = False
+    posted_at: str = field(default_factory=utcnow)
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Post:
+        return cls(
+            id=row["id"],
+            clip_id=row["clip_id"],
+            platform=row["platform"],
+            url=row["url"],
+            approach=row["approach"],
+            title=row["title"],
+            caption=row["caption"],
+            views_48h=row["views_48h"],
+            views_7d=row["views_7d"],
+            submitted=bool(row["submitted"]),
+            posted_at=row["posted_at"],
+        )

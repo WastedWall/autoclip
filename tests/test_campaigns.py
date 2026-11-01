@@ -214,7 +214,7 @@ class TestJobs:
 
     def test_confirmed_job_carries_the_brief(self, client, source) -> None:
         client.post("/api/campaigns", json={"link": LINK})
-        client.put(f"/api/campaigns/{ID}/rules", json={"rules": "Tag @show"})
+        client.put(f"/api/campaigns/{ID}/rules", json={"rules": "Tag @show", "brand": "Acme"})
 
         job = self.create(client, source, rules_confirmed=True).json()
 
@@ -235,7 +235,7 @@ class TestJobs:
 
     def test_review_gets_the_rules_the_job_was_made_under(self, client, source) -> None:
         client.post("/api/campaigns", json={"link": LINK})
-        client.put(f"/api/campaigns/{ID}/rules", json={"rules": "Old rule"})
+        client.put(f"/api/campaigns/{ID}/rules", json={"rules": "Old rule", "brand": "Acme"})
         job = self.create(client, source, rules_confirmed=True).json()
 
         client.put(f"/api/campaigns/{ID}/rules", json={"rules": "New rule"})

@@ -56,10 +56,16 @@ class ExportRequest:
     style: CaptionStyle
     ratio: str = "9:16"
     burn_captions: bool = True
+    #: Paid disclosure burned into the clip. Empty for clips without a campaign.
+    disclosure: str = ""
 
     @property
     def duration_s(self) -> float:
         return self.end_s - self.start_s
+
+
+def disclosure_label(brand: str) -> str:
+    return f"Paid partnership with {brand}" if brand else ""
 
 
 def ratio_dimensions(ratio: str) -> tuple[int, int]:
@@ -133,7 +139,7 @@ def build_video_filtergraph(
         parts.append(f"{''.join(labels)}concat=n={len(segments)}:v=1:a=0[vcat]")
         current = "[vcat]"
 
-    if request.burn_captions and subtitle_name is not None:
+    if subtitle_name is not None:
         # Bare relative names — ffmpeg runs with its cwd set to the render
         # workspace, so there is nothing here that needs escaping.
         parts.append(f"{current}ass=filename={subtitle_name}:fontsdir={fonts_name}[vout]")
@@ -244,14 +250,17 @@ def export_clip(
     fonts_name = "fonts"
     render_cwd: Path | None = None
 
-    if request.burn_captions and request.words:
+    words = request.words if request.burn_captions else []
+    if words or request.disclosure:
         ass_path = captions_module.write_ass(
             workspace / "captions.ass",
-            request.words,
+            words,
             request.style,
             width=out_w,
             height=out_h,
             time_offset_s=request.start_s,
+            disclosure=request.disclosure,
+            duration_s=request.duration_s,
         )
         render_cwd, subtitle_name, fonts_name = ffmpeg.relative_filter_workspace(
             ass_path, captions_module.FONT_DIR

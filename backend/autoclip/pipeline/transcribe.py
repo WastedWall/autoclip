@@ -128,6 +128,7 @@ def transcribe(
         str(audio),
         language=settings.language or None,
         word_timestamps=True,
+        condition_on_previous_text=settings.condition_on_previous_text,
         vad_filter=True,
         # Trims long silences before decoding, which both speeds things up and
         # stops Whisper hallucinating text into empty audio.

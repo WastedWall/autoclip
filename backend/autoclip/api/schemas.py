@@ -12,7 +12,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ..campaigns import STANDING_RULES, Campaign, blocked_topics, views_needed
+from ..campaigns import (
+    STANDING_RULES,
+    Campaign,
+    CampaignDetails,
+    blocked_topics,
+    views_needed,
+)
 from ..db import models
 
 
@@ -117,6 +123,8 @@ class CampaignLinkIn(BaseModel):
 
 class CampaignRulesIn(BaseModel):
     rules: str
+    brand: str = ""
+    required_tags: str = ""
 
 
 class CampaignPayoutOut(BaseModel):
@@ -146,13 +154,15 @@ class CampaignOut(BaseModel):
     requirement_count: int
     reference_count: int
     rules: str
+    brand: str
+    required_tags: str
     #: False while the campaign has hidden rules and none were pasted in.
     rules_complete: bool
     standing_rules: list[str]
     blocked_topics: list[str]
 
     @classmethod
-    def of(cls, campaign: Campaign, rules: str) -> CampaignOut:
+    def of(cls, campaign: Campaign, rules: str, details: CampaignDetails) -> CampaignOut:
         payouts = [
             CampaignPayoutOut(
                 platform=payout["platform"],
@@ -169,6 +179,8 @@ class CampaignOut(BaseModel):
             **fields,
             payouts=payouts,
             rules=rules,
+            brand=details.brand,
+            required_tags=details.required_tags,
             rules_complete=bool(rules) or campaign.locked_items == 0,
             standing_rules=STANDING_RULES,
             blocked_topics=blocked_topics(campaign, rules),
@@ -179,12 +191,88 @@ class CampaignReadingOut(BaseModel):
     lines: list[str]
 
 
+class TopicIn(BaseModel):
+    topic: str = Field(min_length=2, max_length=120)
+
+
+class TopicOut(BaseModel):
+    topic: str
+
+
+class WebSourceOut(BaseModel):
+    title: str
+    url: str
+
+
+class GeminiReportOut(BaseModel):
+    text: str
+    suggestions_html: str
+    sources: list[WebSourceOut]
+
+
+class YouTubeResultOut(BaseModel):
+    title: str
+    channel: str
+    views: int
+    url: str
+
+
+class PostKitIn(BaseModel):
+    approach: Literal["search", "curiosity", "opinion"]
+    keywords: str = Field(default="", max_length=300)
+
+
+class PostIn(BaseModel):
+    url: str = Field(pattern=r"^https://\S+$", max_length=500)
+    approach: str = ""
+    title: str = ""
+    caption: str = ""
+
+
+class PostResultsIn(BaseModel):
+    views_48h: int | None = Field(default=None, ge=0)
+    views_7d: int | None = Field(default=None, ge=0)
+    submitted: bool = False
+
+
+class PostOut(BaseModel):
+    id: str
+    clip_id: str
+    platform: str
+    url: str
+    approach: str
+    title: str
+    caption: str
+    views_48h: int | None
+    views_7d: int | None
+    submitted: bool
+    posted_at: str
+
+    @classmethod
+    def of(cls, post: models.Post) -> PostOut:
+        return cls(**vars(post))
+
+
+class PostKitStateOut(BaseModel):
+    kit: dict[str, Any] | None
+    posts: list[PostOut]
+
+
+class PostRowOut(BaseModel):
+    clip_id: str
+    job_id: str
+    clip_title: str
+    platform: str
+    post: PostOut | None
+
+
 class JobCampaignOut(BaseModel):
     """The rules a job was made under, from its settings snapshot."""
 
     campaign_id: str
     name: str
     brief: str
+    brand: str
     standing_rules: list[str]
 
 

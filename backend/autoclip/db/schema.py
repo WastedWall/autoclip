@@ -4,7 +4,7 @@ Migrations are driven by SQLite's ``user_version`` pragma: each entry in
 :data:`MIGRATIONS` moves the database forward one version. Applying them is
 idempotent, so :func:`migrate` runs safely on every startup.
 
-We use raw ``sqlite3`` rather than an ORM. The schema is six small tables read
+We use raw ``sqlite3`` rather than an ORM. The schema is eight small tables read
 by one local process, so an ORM would add a dependency and a layer of
 indirection without buying anything.
 """
@@ -100,13 +100,41 @@ CREATE INDEX idx_exports_clip ON exports(clip_id);
 """
 
 
+_V2 = """
+CREATE TABLE post_kits (
+    clip_id    TEXT PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+    data_json  TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE posts (
+    id         TEXT PRIMARY KEY,
+    clip_id    TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    platform   TEXT NOT NULL CHECK (platform IN ('tiktok', 'instagram', 'youtube')),
+    approach   TEXT NOT NULL DEFAULT '',
+    title      TEXT NOT NULL DEFAULT '',
+    caption    TEXT NOT NULL DEFAULT '',
+    url        TEXT NOT NULL,
+    views_48h  INTEGER,
+    views_7d   INTEGER,
+    submitted  INTEGER NOT NULL DEFAULT 0,
+    posted_at  TEXT NOT NULL,
+    UNIQUE (clip_id, platform)
+);
+"""
+
+
 def _migration_v1(conn: sqlite3.Connection) -> None:
     conn.executescript(_V1)
 
 
+def _migration_v2(conn: sqlite3.Connection) -> None:
+    conn.executescript(_V2)
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migration_v1]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migration_v1, _migration_v2]
 
 SCHEMA_VERSION = len(MIGRATIONS)
 

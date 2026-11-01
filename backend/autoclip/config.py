@@ -41,6 +41,7 @@ KEYED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini")
 
 #: Extra secrets that aren't tied to a provider.
 HF_TOKEN_KEY = "huggingface_token"
+YOUTUBE_KEY = "youtube"
 
 
 class ProviderSettings(BaseModel):
@@ -68,6 +69,9 @@ class WhisperSettings(BaseModel):
     #: Run WhisperX diarization to label words by speaker. Needs the
     #: ``diarization`` extra and a HuggingFace token.
     diarization: bool = False
+    #: Feed each section's text into the next. Off, because on long videos it
+    #: lets one unpunctuated section turn the rest of the transcript lowercase.
+    condition_on_previous_text: bool = False
 
 
 class ClipSettings(BaseModel):
@@ -78,6 +82,10 @@ class ClipSettings(BaseModel):
     brief: str = ""
     #: The campaign a job was made for, kept with its settings snapshot.
     campaign_id: str = ""
+    #: The brand named in the paid disclosure burned into each clip.
+    disclosure_brand: str = ""
+    #: Tags and mentions the campaign requires in every caption.
+    required_tags: str = ""
 
 
 class IngestSettings(BaseModel):

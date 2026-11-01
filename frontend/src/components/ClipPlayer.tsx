@@ -4,6 +4,9 @@ import { formatTimecode, type CaptionStyle, type CropPath, type Word } from '../
 
 const VOLUME_KEY = 'autoclip.volume'
 
+/** Matches autoclip.pipeline.captions.DISCLOSURE_FULL_S. */
+const DISCLOSURE_FULL_S = 3
+
 /** Output shapes, matching autoclip.pipeline.export.RATIOS. */
 const ASPECTS: Record<string, [number, number]> = {
   '9:16': [9, 16],
@@ -35,6 +38,7 @@ export function ClipPlayer({
   style,
   ratio,
   cropPath,
+  disclosure,
 }: {
   src: string
   startS: number
@@ -43,6 +47,7 @@ export function ClipPlayer({
   style: CaptionStyle | undefined
   ratio: string
   cropPath?: CropPath | null
+  disclosure?: string
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -156,6 +161,12 @@ export function ClipPlayer({
         />
 
         <CaptionOverlay words={words} time={time} style={style} />
+
+        {disclosure && (
+          <span className="pointer-events-none absolute left-[5%] top-[10%] bg-ink-100 px-2 py-1 text-xs font-bold text-ink-900">
+            {time - startS < DISCLOSURE_FULL_S ? disclosure : '#Ad'}
+          </span>
+        )}
 
         {!playing && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center">

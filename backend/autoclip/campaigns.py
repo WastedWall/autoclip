@@ -46,8 +46,8 @@ STANDING_RULES = [
     "Disclose at the beginning of the video too, and in thumbnails and overlays.",
     (
         "Instagram: Paid Partnership tag where applicable. TikTok: Paid Partnership or "
-        "Sponsored Content toggle where available. YouTube: paid promotion checkbox and a "
-        "disclosure in the description."
+        "Sponsored Content toggle where available. YouTube: Branded content setting, under "
+        "Show more, and a disclosure in the description."
     ),
     "A clip without a proper disclosure can be rejected, and its payment is lost.",
     "Never buy views or engagement. That is a permanent ban.",
@@ -80,6 +80,14 @@ class Campaign:
     @property
     def locked_items(self) -> int:
         return self.rule_count + self.requirement_count + self.reference_count
+
+
+@dataclass
+class CampaignDetails:
+    """What only the user can supply, used word for word in clips and captions."""
+
+    brand: str = ""
+    required_tags: str = ""
 
 
 def campaign_id(link: str) -> str:
@@ -198,6 +206,20 @@ def write_rules(campaign: Campaign, rules: str) -> None:
     folder = _folder(campaign.id) or _new_folder(campaign)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "rules.txt").write_text(f"{rules.strip()}\n", encoding="utf-8")
+
+
+def read_details(campaign: Campaign) -> CampaignDetails:
+    folder = _folder(campaign.id)
+    path = folder / "details.json" if folder else None
+    if not path or not path.exists():
+        return CampaignDetails()
+    return CampaignDetails(**json.loads(path.read_text(encoding="utf-8")))
+
+
+def write_details(campaign: Campaign, details: CampaignDetails) -> None:
+    folder = _folder(campaign.id) or _new_folder(campaign)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "details.json").write_text(json.dumps(asdict(details), indent=2), encoding="utf-8")
 
 
 def build_brief(campaign: Campaign, rules: str) -> str:

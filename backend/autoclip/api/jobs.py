@@ -67,8 +67,16 @@ def _apply_campaign(settings, overrides: JobSettingsIn) -> None:
     if not overrides.rules_confirmed:
         raise HTTPException(status_code=400, detail="Confirm the rules before clipping.")
 
+    details = campaigns.read_details(campaign)
+    if not details.brand:
+        raise HTTPException(
+            status_code=400, detail="Add the brand name, so clips carry the paid disclosure."
+        )
+
     settings.clips.brief = campaigns.build_brief(campaign, rules)
     settings.clips.campaign_id = campaign.id
+    settings.clips.disclosure_brand = details.brand
+    settings.clips.required_tags = details.required_tags
 
 
 @router.post("", response_model=JobOut, status_code=201)
@@ -130,6 +138,7 @@ async def job_campaign(job_id: str) -> JobCampaignOut | None:
         campaign_id=clips["campaign_id"],
         name=brief.split("\n", 1)[0],
         brief=brief,
+        brand=clips.get("disclosure_brand", ""),
         standing_rules=campaigns.STANDING_RULES,
     )
 

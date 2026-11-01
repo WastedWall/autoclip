@@ -380,6 +380,7 @@ class PipelineRunner:
                 words=words,
                 style=style,
                 ratio=ratio,
+                disclosure=export.disclosure_label(self.settings.clips.disclosure_brand),
             )
 
             def clip_progress(fraction: float, i: int = index) -> None:

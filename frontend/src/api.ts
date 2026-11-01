@@ -205,6 +205,8 @@ export interface Campaign {
   requirement_count: number
   reference_count: number
   rules: string
+  brand: string
+  required_tags: string
   rules_complete: boolean
   standing_rules: string[]
   blocked_topics: string[]
@@ -215,7 +217,54 @@ export interface JobCampaign {
   campaign_id: string
   name: string
   brief: string
+  brand: string
   standing_rules: string[]
+}
+
+export interface PostKit {
+  approach: string
+  keywords: string
+  title: string
+  caption: string
+  category: string
+  language: string
+  flags: string[]
+}
+
+export interface Post {
+  id: string
+  clip_id: string
+  platform: string
+  url: string
+  approach: string
+  title: string
+  caption: string
+  views_48h: number | null
+  views_7d: number | null
+  submitted: boolean
+  posted_at: string
+}
+
+export interface PostRow {
+  clip_id: string
+  job_id: string
+  clip_title: string
+  platform: string
+  post: Post | null
+}
+
+/** A live report, shown unchanged with Google's suggestions. Never stored. */
+export interface GeminiReport {
+  text: string
+  suggestions_html: string
+  sources: { title: string; url: string }[]
+}
+
+export interface YouTubeResult {
+  title: string
+  channel: string
+  views: number
+  url: string
 }
 
 /** An API error carrying the server's message and its actionable hint. */
@@ -300,14 +349,61 @@ export const api = {
   readCampaign: (link: string) =>
     request<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify({ link }) }),
 
-  putCampaignRules: (id: string, rules: string) =>
+  putCampaignRules: (
+    id: string,
+    details: { rules: string; brand: string; required_tags: string },
+  ) =>
     request<Campaign>(`/api/campaigns/${id}/rules`, {
       method: 'PUT',
-      body: JSON.stringify({ rules }),
+      body: JSON.stringify(details),
     }),
 
   campaignReading: (id: string) =>
     request<{ lines: string[] }>(`/api/campaigns/${id}/reading`, { method: 'POST' }),
+
+  getPostKit: (clipId: string) =>
+    request<{ kit: PostKit | null; posts: Post[] }>(`/api/clips/${clipId}/post-kit`),
+
+  writePostKit: (clipId: string, approach: string, keywords: string) =>
+    request<{ kit: PostKit | null; posts: Post[] }>(`/api/clips/${clipId}/post-kit`, {
+      method: 'POST',
+      body: JSON.stringify({ approach, keywords }),
+    }),
+
+  suggestTopic: (clipId: string) =>
+    request<{ topic: string }>(`/api/clips/${clipId}/topic`, { method: 'POST' }),
+
+  researchGemini: (topic: string) =>
+    request<GeminiReport>('/api/research/gemini', {
+      method: 'POST',
+      body: JSON.stringify({ topic }),
+    }),
+
+  researchYouTube: (topic: string) =>
+    request<YouTubeResult[]>('/api/research/youtube', {
+      method: 'POST',
+      body: JSON.stringify({ topic }),
+    }),
+
+  revealClip: (clipId: string) =>
+    request<void>(`/api/clips/${clipId}/reveal`, { method: 'POST' }),
+
+  markPosted: (
+    clipId: string,
+    platform: string,
+    post: { url: string; approach: string; title: string; caption: string },
+  ) =>
+    request<Post>(`/api/clips/${clipId}/posts/${platform}`, {
+      method: 'PUT',
+      body: JSON.stringify(post),
+    }),
+
+  listPosts: () => request<PostRow[]>('/api/posts'),
+
+  updatePost: (
+    id: string,
+    results: { views_48h: number | null; views_7d: number | null; submitted: boolean },
+  ) => request<Post>(`/api/posts/${id}`, { method: 'PATCH', body: JSON.stringify(results) }),
 
   cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
   retryJob: (id: string) => request<Job>(`/api/jobs/${id}/retry`, { method: 'POST' }),

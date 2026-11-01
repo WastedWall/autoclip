@@ -211,6 +211,9 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         words=words,
         style=style,
         ratio=payload.ratio,
+        disclosure=export_module.disclosure_label(
+            job.settings.get("clips", {}).get("disclosure_brand", "")
+        ),
     )
 
     try:

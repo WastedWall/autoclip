@@ -15,6 +15,7 @@ import {
 import { CaptionEditor } from '../components/CaptionEditor'
 import { ClipPlayer } from '../components/ClipPlayer'
 import { ErrorNote } from '../components/ErrorNote'
+import { PostKit } from '../components/PostKit'
 import { StandingRules } from '../components/StandingRules'
 import { TrimBar } from '../components/TrimBar'
 
@@ -242,6 +243,9 @@ export function Review() {
                   style={activeStyle}
                   ratio={selected.ratio}
                   cropPath={cropPath}
+                  disclosure={
+                    campaign?.brand ? `Paid partnership with ${campaign.brand}` : undefined
+                  }
                 />
                 <TrimBar
                   words={words}
@@ -357,6 +361,12 @@ export function Review() {
               </>
             )}
           </section>
+        </div>
+      )}
+
+      {selected && (
+        <div className="mt-14 max-w-4xl">
+          <PostKit key={selected.id} clip={selected} onError={setError} />
         </div>
       )}
     </div>

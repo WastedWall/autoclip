@@ -185,12 +185,21 @@ function RulesEditor({
   onError: (error: Error) => void
 }) {
   const [text, setText] = useState(campaign.rules)
+  const [brand, setBrand] = useState(campaign.brand)
+  const [tags, setTags] = useState(campaign.required_tags)
   const [saving, setSaving] = useState(false)
+
+  const changed =
+    text.trim() !== campaign.rules ||
+    brand.trim() !== campaign.brand ||
+    tags.trim() !== campaign.required_tags
 
   const save = async () => {
     setSaving(true)
     try {
-      onChange(await api.putCampaignRules(campaign.id, text))
+      onChange(
+        await api.putCampaignRules(campaign.id, { rules: text, brand, required_tags: tags }),
+      )
     } catch (err) {
       onError(err as Error)
     } finally {
@@ -218,11 +227,29 @@ function RulesEditor({
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <label className="mt-5 block">
+        <span className="eyebrow">Brand name, shown in the paid disclosure</span>
+        <input
+          className="field mt-1 text-sm"
+          value={brand}
+          onChange={(e) => setBrand(e.target.value)}
+          placeholder="The brand paying for the clips"
+        />
+      </label>
+      <label className="mt-5 block">
+        <span className="eyebrow">Required tags and mentions, word for word</span>
+        <input
+          className="field mt-1 text-sm"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          placeholder="#tag @account"
+        />
+      </label>
       <button
         type="button"
         onClick={save}
-        className="btn btn-ghost mt-3"
-        disabled={saving || text.trim() === campaign.rules}
+        className="btn btn-ghost mt-4"
+        disabled={saving || !changed}
       >
         {saving ? 'Saving…' : 'Save rules'}
       </button>
@@ -330,6 +357,7 @@ function StartClipping({
 
   const blocked = campaign.blocked_topics.length > 0
   const hasVideo = Boolean(file || url.trim())
+  const needsBrand = !campaign.brand
 
   const start = async () => {
     setBusy(true)
@@ -394,11 +422,14 @@ function StartClipping({
           : 'Clip without the hidden rules. I have read what is shown here'}
       </label>
 
+      {needsBrand && (
+        <p className="mt-4 text-sm text-ink-300">Save the brand name first, for the disclosure.</p>
+      )}
       <button
         type="button"
         onClick={start}
         className="btn btn-primary mt-5"
-        disabled={blocked || busy || !hasVideo || !confirmed}
+        disabled={blocked || busy || !hasVideo || !confirmed || needsBrand}
       >
         {busy ? 'Starting…' : 'Clip this video'}
       </button>

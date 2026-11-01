@@ -11,7 +11,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException
 
 from .. import campaigns
-from ..campaigns import Campaign, CampaignError
+from ..campaigns import Campaign, CampaignDetails, CampaignError
 from ..config import load as load_settings
 from ..providers import ProviderError, build_provider
 from .schemas import CampaignLinkIn, CampaignOut, CampaignReadingOut, CampaignRulesIn
@@ -20,7 +20,8 @@ router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
 
 def _out(campaign: Campaign) -> CampaignOut:
-    return CampaignOut.of(campaign, campaigns.read_rules(campaign))
+    details = campaigns.read_details(campaign)
+    return CampaignOut.of(campaign, campaigns.read_rules(campaign), details)
 
 
 async def _saved(campaign_id: str) -> Campaign:
@@ -58,6 +59,8 @@ async def get_campaign(campaign_id: str) -> CampaignOut:
 async def put_rules(campaign_id: str, payload: CampaignRulesIn) -> CampaignOut:
     campaign = await _saved(campaign_id)
     await asyncio.to_thread(campaigns.write_rules, campaign, payload.rules)
+    details = CampaignDetails(payload.brand.strip(), payload.required_tags.strip())
+    await asyncio.to_thread(campaigns.write_details, campaign, details)
     return _out(campaign)
 
 

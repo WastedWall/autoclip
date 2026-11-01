@@ -13,6 +13,7 @@ it's why event counts look high relative to word counts.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -239,6 +240,11 @@ def group_words(
 # --------------------------------------------------------------------------
 
 STYLE_NAME = "AutoClip"
+DISCLOSURE_STYLE_NAME = "Disclosure"
+
+#: How long the full disclosure stays up before it shrinks to a small #Ad.
+DISCLOSURE_FULL_S = 3.0
+DISCLOSURE_SHORT = "#Ad"
 
 
 def build_ass(
@@ -248,11 +254,14 @@ def build_ass(
     width: int,
     height: int,
     time_offset_s: float = 0.0,
+    disclosure: str = "",
+    duration_s: float = 0.0,
 ) -> pysubs2.SSAFile:
     """Build an ASS subtitle file for a clip.
 
     ``time_offset_s`` is subtracted from every timestamp, so absolute transcript
-    times become clip-relative ones.
+    times become clip-relative ones. A ``disclosure`` shows in full at the start
+    of the clip, then as a small #Ad until ``duration_s``.
 
     Preconditions:
         words are in chronological order and carry start/end timings.
@@ -276,7 +285,51 @@ def build_ass(
         else:
             subs.events.append(_static_event(group, style, time_offset_s))
 
+    if disclosure:
+        subs.styles[DISCLOSURE_STYLE_NAME] = _disclosure_style(width=width, height=height)
+        subs.events.extend(_disclosure_events(disclosure, duration_s))
+
     return subs
+
+
+def _disclosure_style(*, width: int, height: int) -> pysubs2.SSAStyle:
+    style = pysubs2.SSAStyle()
+    style.fontname = "Inter"
+    style.fontsize = round(height * 0.026)
+    style.primarycolor = hex_to_ass("#111111")
+    style.outlinecolor = hex_to_ass("#F2F2F2")
+    style.backcolor = hex_to_ass("#F2F2F2")
+    style.bold = True
+    # BorderStyle 3 draws a solid box, which stays readable on any footage.
+    style.borderstyle = 3
+    style.outline = round(height * 0.006)
+    style.shadow = 0
+    style.alignment = pysubs2.Alignment.TOP_LEFT
+    style.marginl = style.marginr = round(width * 0.05)
+    # Below the platforms' own top controls.
+    style.marginv = round(height * 0.1)
+    return style
+
+
+def _disclosure_events(disclosure: str, duration_s: float) -> list[pysubs2.SSAEvent]:
+    # Braces and backslashes are ASS markup, and the brand is typed by the user.
+    text = re.sub(r"[{}\\]", "", disclosure)
+    full_until = min(DISCLOSURE_FULL_S, duration_s)
+    events = [
+        pysubs2.SSAEvent(
+            start=0, end=pysubs2.make_time(s=full_until), text=text, style=DISCLOSURE_STYLE_NAME
+        )
+    ]
+    if duration_s > full_until:
+        events.append(
+            pysubs2.SSAEvent(
+                start=pysubs2.make_time(s=full_until),
+                end=pysubs2.make_time(s=duration_s),
+                text=DISCLOSURE_SHORT,
+                style=DISCLOSURE_STYLE_NAME,
+            )
+        )
+    return events
 
 
 def _build_ass_style(style: CaptionStyle, *, height: int, scale: float) -> pysubs2.SSAStyle:
@@ -375,9 +428,19 @@ def write_ass(
     width: int,
     height: int,
     time_offset_s: float = 0.0,
+    disclosure: str = "",
+    duration_s: float = 0.0,
 ) -> Path:
     """Render captions to an .ass file and return its path."""
-    subs = build_ass(words, style, width=width, height=height, time_offset_s=time_offset_s)
+    subs = build_ass(
+        words,
+        style,
+        width=width,
+        height=height,
+        time_offset_s=time_offset_s,
+        disclosure=disclosure,
+        duration_s=duration_s,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     subs.save(str(path), encoding="utf-8")
     return path

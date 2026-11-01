@@ -18,6 +18,7 @@ from .models import (
     Export,
     Job,
     JobStatus,
+    Post,
     Source,
     Transcript,
     utcnow,
@@ -391,3 +392,99 @@ def list_exports(clip_id: str) -> list[Export]:
             "SELECT * FROM exports WHERE clip_id = ? ORDER BY created_at DESC", (clip_id,)
         ).fetchall()
     return [Export.from_row(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# Post kits and posts
+# --------------------------------------------------------------------------
+
+
+def save_post_kit(clip_id: str, data: dict[str, Any]) -> None:
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO post_kits (clip_id, data_json, created_at) VALUES (?, ?, ?)
+            ON CONFLICT (clip_id) DO UPDATE SET
+                data_json = excluded.data_json, created_at = excluded.created_at
+            """,
+            (clip_id, json.dumps(data), utcnow()),
+        )
+
+
+def get_post_kit(clip_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT data_json FROM post_kits WHERE clip_id = ?", (clip_id,)
+        ).fetchone()
+    return json.loads(row["data_json"]) if row else None
+
+
+def save_post(post: Post) -> Post:
+    """Record a clip's post on a platform. Posting again replaces the details."""
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO posts
+                (id, clip_id, platform, approach, title, caption, url, posted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (clip_id, platform) DO UPDATE SET
+                approach = excluded.approach, title = excluded.title,
+                caption = excluded.caption, url = excluded.url
+            """,
+            (
+                post.id,
+                post.clip_id,
+                post.platform,
+                post.approach,
+                post.title,
+                post.caption,
+                post.url,
+                post.posted_at,
+            ),
+        )
+    return get_clip_post(post.clip_id, post.platform) or post
+
+
+def get_clip_post(clip_id: str, platform: str) -> Post | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM posts WHERE clip_id = ? AND platform = ?", (clip_id, platform)
+        ).fetchone()
+    return Post.from_row(row) if row else None
+
+
+def get_post(post_id: str) -> Post | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+    return Post.from_row(row) if row else None
+
+
+def list_clip_posts(clip_id: str) -> list[Post]:
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM posts WHERE clip_id = ?", (clip_id,)).fetchall()
+    return [Post.from_row(row) for row in rows]
+
+
+def update_post_results(
+    post_id: str, *, views_48h: int | None, views_7d: int | None, submitted: bool
+) -> None:
+    with connection() as conn:
+        conn.execute(
+            "UPDATE posts SET views_48h = ?, views_7d = ?, submitted = ? WHERE id = ?",
+            (views_48h, views_7d, int(submitted), post_id),
+        )
+
+
+def list_postable_clips() -> list[Clip]:
+    """Clips the user kept or has already posted, newest job first."""
+    with connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT clips.* FROM clips
+            JOIN jobs ON jobs.id = clips.job_id
+            WHERE clips.status = 'kept'
+               OR clips.id IN (SELECT clip_id FROM posts)
+            ORDER BY jobs.created_at DESC, clips.rank
+            """
+        ).fetchall()
+    return [Clip.from_row(row) for row in rows]
