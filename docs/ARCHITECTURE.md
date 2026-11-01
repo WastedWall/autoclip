@@ -48,6 +48,9 @@ backend/autoclip/
 ├── config.py         settings + OS-keyring secrets
 ├── system.py         environment probing (ffmpeg, GPU, deps)
 ├── models.py         ML model bundle download and cache
+├── campaigns.py      campaign data and rules from one public page
+├── research.py       OpenAI SEO report and YouTube results
+├── postkit.py        titles and captions for posting
 ├── api/              REST routers and wire schemas
 ├── db/               SQLite schema, migrations, row models, CRUD
 ├── jobs/             queue and SSE broker
@@ -133,7 +136,7 @@ capability rather than assuming "GPU means float16".
 
 ## Data model
 
-Six tables (`db/schema.py`), migrated by SQLite's `user_version` pragma. Each
+Eight tables (`db/schema.py`), migrated by SQLite's `user_version` pragma. Each
 migration is append-only: once a user's database is at v3, editing migration 2
 silently diverges their schema from a fresh install's.
 
@@ -145,6 +148,8 @@ silently diverges their schema from a fresh install's.
 | `clips`      | detected clips with boundaries and scores           |
 | `clip_edits` | user caption edits, style, ratio                    |
 | `exports`    | rendered files                                      |
+| `post_kits`  | research, approaches and the title and caption      |
+| `posts`      | what was posted where, with views                   |
 
 ## Provider abstraction
 
