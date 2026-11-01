@@ -7,13 +7,21 @@ shapes models actually emit.
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
+from autoclip.config import ProviderSettings, Settings
+from autoclip.pipeline.highlights import HighlightError, detect
+from autoclip.pipeline.transcript import Transcript, Word
 from autoclip.providers import ClipCandidates, DetectionConfig, TranscriptWindow
 from autoclip.providers.base import (
     LLMProvider,
     ProviderError,
     ProviderStatus,
     extract_json_object,
+    render_window_prompt,
 )
 
 VALID = '{"clips":[{"start_word_index":10,"end_word_index":50,"title":"T","score":80}]}'
@@ -217,3 +225,63 @@ class TestRegistry:
         provider = OpenAIProvider("llama-3.1", base_url="https://openrouter.ai/api/v1")
 
         assert provider.base_url == "https://openrouter.ai/api/v1"
+
+
+class TestCampaignBrief:
+    def test_brief_goes_into_the_window_prompt(self, window: TranscriptWindow) -> None:
+        prompt = render_window_prompt(window, DetectionConfig(brief="Mention @acme"))
+
+        assert "Mention @acme" in prompt
+
+    def test_no_brief_leaves_the_prompt_alone(self, window: TranscriptWindow) -> None:
+        assert "Campaign brief" not in render_window_prompt(window, DetectionConfig())
+
+
+class TestProviderOptions:
+    def test_build_provider_applies_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from autoclip.providers import build_provider
+
+        monkeypatch.setenv("AUTOCLIP_OPENAI_KEY", "not-needed")
+        options = {"chat_template_kwargs": {"enable_thinking": False}}
+        settings = Settings()
+        settings.providers["openai"] = ProviderSettings(extra_body=options, concurrency=1)
+
+        provider = build_provider("openai", settings)
+
+        assert provider.extra_body == options
+        assert provider.concurrency == 1
+
+    async def test_openai_provider_sends_extra_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from autoclip.providers import OpenAIProvider
+
+        message = SimpleNamespace(content="{}")
+        create = AsyncMock(return_value=SimpleNamespace(choices=[SimpleNamespace(message=message)]))
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        provider = OpenAIProvider("qwen", api_key="not-needed")
+        provider.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+        monkeypatch.setattr(provider, "_client", lambda: client)
+
+        await provider._complete("system", "user", DetectionConfig())
+
+        assert create.await_args.kwargs["extra_body"] == provider.extra_body
+
+    async def test_detect_honours_provider_concurrency(self) -> None:
+        class Counting(ScriptedProvider):
+            running = 0
+            peak = 0
+
+            async def _complete(self, system: str, user: str, config: DetectionConfig) -> str:
+                self.running += 1
+                self.peak = max(self.peak, self.running)
+                await asyncio.sleep(0)
+                self.running -= 1
+                return '{"clips":[]}'
+
+        provider = Counting([])
+        provider.concurrency = 1
+        words = [Word(text="word", start=float(i), end=i + 0.5) for i in range(1800)]
+
+        with pytest.raises(HighlightError):
+            await detect(Transcript(words=words), provider, DetectionConfig(), job_id="job")
+
+        assert provider.peak == 1

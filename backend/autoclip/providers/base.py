@@ -116,6 +116,8 @@ class DetectionConfig:
     #: iterate on prompts without touching code.
     prompt_version: str = "highlight_v1"
     temperature: float = 0.3
+    #: Campaign brief the clips must follow. Empty means no campaign.
+    brief: str = ""
 
 
 @dataclass
@@ -138,6 +140,10 @@ class LLMProvider(ABC):
     name: str = ""
     #: Whether the provider needs an API key.
     requires_key: bool = True
+    #: Requests to run at once. 0 means the default for the provider.
+    concurrency: int = 0
+    #: Extra request body fields. Only the OpenAI-compatible provider sends them.
+    extra_body: dict[str, Any] | None = None
 
     def __init__(self, model: str, *, api_key: str | None = None, base_url: str | None = None):
         self.model = model
@@ -237,10 +243,14 @@ def render_window_prompt(window: TranscriptWindow, config: DetectionConfig) -> s
             f"({', '.join(window.speakers)}); speaker labels are shown inline.\n"
         )
 
+    brief_note = ""
+    if config.brief:
+        brief_note = f"\nCampaign brief, every clip must follow it:\n{config.brief}\n"
+
     return (
         f"Transcript section, words {window.first_word} to {window.last_word}.\n"
         f"Each word is tagged with its index as [index]word.\n"
-        f"{speaker_note}\n"
+        f"{speaker_note}{brief_note}\n"
         f"Clip length must be between {config.min_duration_s:.0f} and "
         f"{config.max_duration_s:.0f} seconds.\n"
         f"Return at most {config.max_clips} clips.\n\n"

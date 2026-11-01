@@ -73,11 +73,14 @@ def build_provider(name: str | None = None, settings: Settings | None = None) ->
     provider_settings = settings.provider(key)
     api_key = get_secret(key, settings) if provider_cls.requires_key else None
 
-    return provider_cls(
+    provider = provider_cls(
         provider_settings.model,
         api_key=api_key,
         base_url=provider_settings.base_url,
     )
+    provider.extra_body = provider_settings.extra_body
+    provider.concurrency = provider_settings.concurrency
+    return provider
 
 
 def detection_config(settings: Settings | None = None) -> DetectionConfig:
@@ -90,4 +93,5 @@ def detection_config(settings: Settings | None = None) -> DetectionConfig:
         max_duration_s=settings.clips.max_duration_s,
         max_clips=settings.clips.max_clips,
         language=settings.whisper.language,
+        brief=settings.clips.brief,
     )

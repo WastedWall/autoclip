@@ -313,6 +313,41 @@ class TestEncoding:
 
         assert ffmpeg.probe(destination).video_codec == "h264"
 
+    def test_source_chapters_do_not_stretch_the_clip(self, source_video, words, tmp_path) -> None:
+        chapters = tmp_path / "chapters.txt"
+        chapters.write_text(
+            ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=10000\ntitle=Intro\n",
+            encoding="utf-8",
+        )
+        source = tmp_path / "chaptered.mp4"
+        subprocess.run(
+            [
+                ffmpeg.ffmpeg_path(),
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(source_video),
+                "-i",
+                str(chapters),
+                "-map_chapters",
+                "1",
+                "-c",
+                "copy",
+                str(source),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        destination = tmp_path / "out.mp4"
+
+        export.export_clip(
+            make_request(source, destination, centre_crop(SOURCE_W, SOURCE_H, 5.0), words),
+            work_dir=tmp_path / "work",
+        )
+
+        assert ffmpeg.probe(destination).duration_s == pytest.approx(5.0, abs=0.35)
+
     def test_output_is_yuv420p(self, source_video, words, tmp_path) -> None:
         # Anything else fails to play on a surprising number of phones.
         destination = tmp_path / "pixfmt.mp4"

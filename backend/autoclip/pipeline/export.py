@@ -280,6 +280,12 @@ def export_clip(
         "[vout]",
         "-map",
         "0:a?",
+        # Source chapters would come along as a text track with the full video's
+        # timings, which makes the clip report the wrong duration.
+        "-map_chapters",
+        "-1",
+        "-map_metadata",
+        "-1",
         "-af",
         build_audio_filtergraph(settings),
         *encoder_args(settings),

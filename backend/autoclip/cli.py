@@ -416,6 +416,9 @@ def clip(
     centre_crop: bool = typer.Option(
         False, "--centre-crop", help="Skip face tracking and centre-crop everything."
     ),
+    brief: Path | None = typer.Option(
+        None, "--brief", exists=True, dir_okay=False, help="Text file with the campaign brief."
+    ),
 ) -> None:
     """Turn a video into captioned vertical clips."""
     import asyncio
@@ -442,6 +445,8 @@ def clip(
         settings.whisper.diarization = True
     if centre_crop:
         settings.export.__dict__["centre_crop"] = True
+    if brief:
+        settings.clips.brief = brief.read_text(encoding="utf-8-sig", errors="replace")
 
     # --- ingest ---------------------------------------------------------
     try:

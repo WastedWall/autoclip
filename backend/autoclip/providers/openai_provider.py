@@ -76,6 +76,8 @@ class OpenAIProvider(LLMProvider):
                 {"role": "user", "content": user},
             ],
         }
+        if self.extra_body:
+            request["extra_body"] = self.extra_body
         # Only OpenAI's own endpoint reliably honours this; other vendors 400 on
         # it, so a failed request is retried once without it.
         try:

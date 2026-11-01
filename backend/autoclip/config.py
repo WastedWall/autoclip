@@ -51,6 +51,11 @@ class ProviderSettings(BaseModel):
     #: OpenRouter, Groq, DeepSeek, or a local LM Studio server is the supported
     #: way to use any other vendor.
     base_url: str | None = None
+    #: Extra request body fields for the OpenAI-compatible provider, for server
+    #: options the SDK has no argument for.
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    #: Requests to run at once. 0 means the default for the provider.
+    concurrency: int = 0
 
 
 class WhisperSettings(BaseModel):
@@ -69,6 +74,8 @@ class ClipSettings(BaseModel):
     min_duration_s: float = 20.0
     max_duration_s: float = 90.0
     max_clips: int = 10
+    #: Campaign brief handed to the model with every transcript window.
+    brief: str = ""
 
 
 class IngestSettings(BaseModel):
