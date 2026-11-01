@@ -17,6 +17,8 @@ import contextlib
 import logging
 from dataclasses import dataclass
 
+from ..config import Settings
+from ..config import load as load_settings
 from ..db import store
 from ..db.models import Job
 from ..pipeline.runner import JobCancelled, PipelineRunner
@@ -136,6 +138,7 @@ class JobQueue:
         runner = PipelineRunner(
             job,
             source,
+            settings=_job_settings(job),
             on_progress=on_progress,
             is_cancelled=lambda: self.is_cancelled(job.id),
         )
@@ -154,6 +157,19 @@ class JobQueue:
         finally:
             self._running_job_id = None
             self._cancel_requested.discard(job.id)
+
+
+def _job_settings(job: Job) -> Settings | None:
+    """The settings a job was created with, including its per-job overrides.
+
+    The snapshot leaves out plaintext fallback secrets on purpose, so those come
+    from the saved settings.
+    """
+    if not job.settings:
+        return None
+    settings = Settings.model_validate(job.settings)
+    settings._fallback_secrets = load_settings()._fallback_secrets
+    return settings
 
 
 def _run_blocking(runner: PipelineRunner):

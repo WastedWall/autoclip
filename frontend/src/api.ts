@@ -174,6 +174,48 @@ export interface JobSettingsOverrides {
   max_clips?: number
   caption_style?: string
   ratio?: string
+  campaign_id?: string
+  rules_confirmed?: boolean
+}
+
+export interface CampaignPayout {
+  platform: string
+  rate_cents: number
+  min_cents: number
+  max_cents: number
+  min_views: number
+  max_views: number
+}
+
+export interface Campaign {
+  id: string
+  name: string
+  host: string
+  status: string
+  launched: string
+  description: string
+  payouts: CampaignPayout[]
+  budget_cents: number
+  spent_cents: number
+  creators: number
+  approved_clips: number
+  total_views: number
+  needs_application: boolean
+  rule_count: number
+  requirement_count: number
+  reference_count: number
+  rules: string
+  rules_complete: boolean
+  standing_rules: string[]
+  blocked_topics: string[]
+}
+
+/** The rules a job was made under. */
+export interface JobCampaign {
+  campaign_id: string
+  name: string
+  brief: string
+  standing_rules: string[]
 }
 
 /** An API error carrying the server's message and its actionable hint. */
@@ -249,6 +291,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ source_id: sourceId, settings }),
     }),
+
+  jobCampaign: (id: string) => request<JobCampaign | null>(`/api/jobs/${id}/campaign`),
+
+  listCampaigns: () => request<Campaign[]>('/api/campaigns'),
+  getCampaign: (id: string) => request<Campaign>(`/api/campaigns/${id}`),
+
+  readCampaign: (link: string) =>
+    request<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify({ link }) }),
+
+  putCampaignRules: (id: string, rules: string) =>
+    request<Campaign>(`/api/campaigns/${id}/rules`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    }),
+
+  campaignReading: (id: string) =>
+    request<{ lines: string[] }>(`/api/campaigns/${id}/reading`, { method: 'POST' }),
 
   cancelJob: (id: string) => request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST' }),
   retryJob: (id: string) => request<Job>(`/api/jobs/${id}/retry`, { method: 'POST' }),

@@ -8,12 +8,13 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from .. import campaigns
 from ..config import load as load_settings
 from ..db import store
 from ..db.models import Job, new_id
 from ..jobs.events import broker
 from ..jobs.queue import queue
-from .schemas import JobCreateIn, JobOut, JobSettingsIn
+from .schemas import JobCampaignOut, JobCreateIn, JobOut, JobSettingsIn
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,30 @@ def _apply_overrides(settings, overrides: JobSettingsIn):
     return merged
 
 
+def _apply_campaign(settings, overrides: JobSettingsIn) -> None:
+    """Attach a campaign's rules to a job, refusing what must never be clipped."""
+    if not overrides.campaign_id:
+        return
+
+    campaign = campaigns.load(overrides.campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+    rules = campaigns.read_rules(campaign)
+    blocked = campaigns.blocked_topics(campaign, rules)
+    if blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This campaign mentions {', '.join(blocked)}. "
+            "Gambling and crypto are excluded.",
+        )
+    if not overrides.rules_confirmed:
+        raise HTTPException(status_code=400, detail="Confirm the rules before clipping.")
+
+    settings.clips.brief = campaigns.build_brief(campaign, rules)
+    settings.clips.campaign_id = campaign.id
+
+
 @router.post("", response_model=JobOut, status_code=201)
 async def create_job(payload: JobCreateIn) -> JobOut:
     source = await asyncio.to_thread(store.get_source, payload.source_id)
@@ -53,6 +78,7 @@ async def create_job(payload: JobCreateIn) -> JobOut:
         raise HTTPException(status_code=404, detail="Source not found.")
 
     settings = _apply_overrides(load_settings(), payload.settings)
+    await asyncio.to_thread(_apply_campaign, settings, payload.settings)
     if settings.clips.min_duration_s >= settings.clips.max_duration_s:
         raise HTTPException(
             status_code=400, detail="Minimum clip length must be below the maximum."
@@ -87,6 +113,25 @@ async def get_job(job_id: str) -> JobOut:
         raise HTTPException(status_code=404, detail="Job not found.")
     source = await asyncio.to_thread(store.get_source, job.source_id)
     return JobOut.of(job, source)
+
+
+@router.get("/{job_id}/campaign", response_model=JobCampaignOut | None)
+async def job_campaign(job_id: str) -> JobCampaignOut | None:
+    """The rules a job was made under. Null for a job without a campaign."""
+    job = await asyncio.to_thread(store.get_job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    clips = job.settings.get("clips", {})
+    if not clips.get("campaign_id"):
+        return None
+    brief = clips.get("brief", "")
+    return JobCampaignOut(
+        campaign_id=clips["campaign_id"],
+        name=brief.split("\n", 1)[0],
+        brief=brief,
+        standing_rules=campaigns.STANDING_RULES,
+    )
 
 
 @router.get("/{job_id}/events")

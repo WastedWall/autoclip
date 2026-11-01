@@ -9,18 +9,36 @@ import {
   type Clip,
   type CropPath,
   type Job,
+  type JobCampaign,
   type Word,
 } from '../api'
 import { CaptionEditor } from '../components/CaptionEditor'
 import { ClipPlayer } from '../components/ClipPlayer'
 import { ErrorNote } from '../components/ErrorNote'
+import { StandingRules } from '../components/StandingRules'
 import { TrimBar } from '../components/TrimBar'
 
 const RATIOS = ['9:16', '1:1', '16:9'] as const
 
+/** The rules this job was made under, open by default so they stay in view. */
+function CampaignRules({ campaign }: { campaign: JobCampaign }) {
+  return (
+    <details open className="mt-6 border-b border-ink-800 pb-6">
+      <summary className="eyebrow cursor-pointer">Rules · {campaign.name}</summary>
+      <div className="mt-4 grid gap-x-16 gap-y-8 lg:grid-cols-2">
+        <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-ink-300">
+          {campaign.brief}
+        </p>
+        <StandingRules rules={campaign.standing_rules} />
+      </div>
+    </details>
+  )
+}
+
 export function Review() {
   const { jobId } = useParams()
   const [job, setJob] = useState<Job | null>(null)
+  const [campaign, setCampaign] = useState<JobCampaign | null>(null)
   const [clips, setClips] = useState<Clip[]>([])
   const [styles, setStyles] = useState<CaptionStyle[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -33,11 +51,17 @@ export function Review() {
 
   useEffect(() => {
     if (!jobId) return
-    void Promise.all([api.getJob(jobId), api.listClips(jobId), api.captionStyles()])
-      .then(([loadedJob, loadedClips, loadedStyles]) => {
+    void Promise.all([
+      api.getJob(jobId),
+      api.listClips(jobId),
+      api.captionStyles(),
+      api.jobCampaign(jobId),
+    ])
+      .then(([loadedJob, loadedClips, loadedStyles, loadedCampaign]) => {
         setJob(loadedJob)
         setClips(loadedClips)
         setStyles(loadedStyles)
+        setCampaign(loadedCampaign)
         setSelectedId((current) => current ?? loadedClips[0]?.id ?? null)
       })
       .catch((err) => setError(err as Error))
@@ -176,6 +200,8 @@ export function Review() {
           <ErrorNote error={error} onDismiss={() => setError(null)} />
         </div>
       )}
+
+      {campaign && <CampaignRules campaign={campaign} />}
 
       {clips.length === 0 ? (
         <EmptyState />

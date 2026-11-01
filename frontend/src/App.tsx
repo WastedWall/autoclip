@@ -30,6 +30,7 @@ export function App() {
             <TopLink to="/" end>
               New
             </TopLink>
+            <TopLink to="/campaigns">Campaign</TopLink>
             <TopLink to="/settings">Settings</TopLink>
           </nav>
 

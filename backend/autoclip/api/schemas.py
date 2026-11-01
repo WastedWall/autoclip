@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..campaigns import STANDING_RULES, Campaign, blocked_topics, views_needed
 from ..db import models
 
 
@@ -68,6 +69,9 @@ class JobSettingsIn(BaseModel):
     max_clips: int | None = Field(default=None, ge=1, le=50)
     caption_style: str | None = None
     ratio: Literal["9:16", "1:1", "16:9"] | None = None
+    campaign_id: str | None = None
+    #: The user has seen this campaign's rules. Required with ``campaign_id``.
+    rules_confirmed: bool = False
 
 
 class JobCreateIn(BaseModel):
@@ -105,6 +109,83 @@ class JobOut(BaseModel):
             finished_at=job.finished_at,
             source=SourceOut.of(source) if source else None,
         )
+
+
+class CampaignLinkIn(BaseModel):
+    link: str
+
+
+class CampaignRulesIn(BaseModel):
+    rules: str
+
+
+class CampaignPayoutOut(BaseModel):
+    platform: str
+    rate_cents: int
+    min_cents: int
+    max_cents: int
+    min_views: int
+    max_views: int
+
+
+class CampaignOut(BaseModel):
+    id: str
+    name: str
+    host: str
+    status: str
+    launched: str
+    description: str
+    payouts: list[CampaignPayoutOut]
+    budget_cents: int
+    spent_cents: int
+    creators: int
+    approved_clips: int
+    total_views: int
+    needs_application: bool
+    rule_count: int
+    requirement_count: int
+    reference_count: int
+    rules: str
+    #: False while the campaign has hidden rules and none were pasted in.
+    rules_complete: bool
+    standing_rules: list[str]
+    blocked_topics: list[str]
+
+    @classmethod
+    def of(cls, campaign: Campaign, rules: str) -> CampaignOut:
+        payouts = [
+            CampaignPayoutOut(
+                platform=payout["platform"],
+                rate_cents=payout["rate"],
+                min_cents=payout["minPayout"],
+                max_cents=payout["maxPayout"],
+                min_views=views_needed(payout["minPayout"], payout["rate"]),
+                max_views=views_needed(payout["maxPayout"], payout["rate"]),
+            )
+            for payout in campaign.payouts
+        ]
+        fields = {key: value for key, value in vars(campaign).items() if key != "payouts"}
+        return cls(
+            **fields,
+            payouts=payouts,
+            rules=rules,
+            rules_complete=bool(rules) or campaign.locked_items == 0,
+            standing_rules=STANDING_RULES,
+            blocked_topics=blocked_topics(campaign, rules),
+        )
+
+
+class CampaignReadingOut(BaseModel):
+    lines: list[str]
+
+
+class JobCampaignOut(BaseModel):
+    """The rules a job was made under, from its settings snapshot."""
+
+    campaign_id: str
+    name: str
+    brief: str
+    standing_rules: list[str]
 
 
 class WordOut(BaseModel):

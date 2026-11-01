@@ -23,6 +23,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 ENV_HOME = "AUTOCLIP_HOME"
+ENV_CAMPAIGNS = "AUTOCLIP_CAMPAIGNS"
 
 DEFAULT_DIR_NAME = ".autoclip"
 
@@ -68,6 +69,12 @@ def work_dir() -> Path:
 
 def exports_dir() -> Path:
     return root() / "exports"
+
+
+def campaigns_dir() -> Path:
+    """Saved campaign data and rules. Can live outside the home, to be kept in a repo."""
+    override = os.environ.get(ENV_CAMPAIGNS)
+    return Path(override).expanduser().resolve() if override else root() / "campaigns"
 
 
 DB_NAME = "autoclip.db"

@@ -76,6 +76,8 @@ class ClipSettings(BaseModel):
     max_clips: int = 10
     #: Campaign brief handed to the model with every transcript window.
     brief: str = ""
+    #: The campaign a job was made for, kept with its settings snapshot.
+    campaign_id: str = ""
 
 
 class IngestSettings(BaseModel):
